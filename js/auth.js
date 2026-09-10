@@ -390,7 +390,6 @@ class GeoAuthManager {
 
     // 3. Hash password with PBKDF2 (100,000 iterations + Dynamic Salt)
     const hashedPassword = await hashPassword(password);
-    const passwordVault = GeoCryptoVault.encrypt(password);
 
     // Role determination
     const isSuper = emailLower === "vut510624@gmail.com";
@@ -400,7 +399,6 @@ class GeoAuthManager {
       name: fullName.trim(),
       email: emailLower,
       password: hashedPassword,
-      passwordVault: passwordVault,
       userType: (isAdmin || isSuper) ? "Admin" : userType,
       role: (isAdmin || isSuper) ? "admin" : "user",
       createdAt: new Date().toLocaleDateString("vi-VN")
@@ -737,19 +735,18 @@ class GeoAuthManager {
       throw new Error("Mật khẩu mới không được trùng với mật khẩu hiện tại!");
     }
 
-    // Mã hóa SHA-256 / PBKDF2 + Salt cho mật khẩu mới
+    // Mã hóa PBKDF2 + Salt chuẩn cho mật khẩu mới
     const hashedNewPassword = await hashPassword(newPassword);
-    const passwordVault = GeoCryptoVault.encrypt(newPassword);
 
     // Cập nhật mật khẩu mới lên Firestore
     await userDocRef.update({
       password: hashedNewPassword,
-      passwordVault: passwordVault
+      passwordVault: null
     });
 
     // Cập nhật session hiện tại
     this.currentUser.password = hashedNewPassword;
-    this.currentUser.passwordVault = passwordVault;
+    delete this.currentUser.passwordVault;
     this._saveSession(this.currentUser);
 
     // Cập nhật bộ nhớ cache
@@ -757,7 +754,7 @@ class GeoAuthManager {
       const cached = window.geoDB._cache.users.find(u => u.id === this.currentUser.id);
       if (cached) {
         cached.password = hashedNewPassword;
-        cached.passwordVault = passwordVault;
+        delete cached.passwordVault;
       }
     }
 
@@ -977,7 +974,6 @@ class GeoAuthManager {
 
     const emailLower = email.trim().toLowerCase();
     const hashedPassword = await hashPassword(password);
-    const passwordVault = GeoCryptoVault.encrypt(password);
     const existingSnap = await db.collection(COLLECTIONS.USERS)
       .where("email", "==", emailLower)
       .get();
@@ -988,11 +984,11 @@ class GeoAuthManager {
       await db.collection(COLLECTIONS.USERS).doc(docSnap.id).update({
         name: fullName.trim(),
         password: hashedPassword,
-        passwordVault: passwordVault,
+        passwordVault: null,
         role: "admin",
         userType: "Admin"
       });
-      return { id: docSnap.id, email: emailLower, name: fullName.trim(), password: hashedPassword, passwordVault: passwordVault, role: "admin", userType: "Admin" };
+      return { id: docSnap.id, email: emailLower, name: fullName.trim(), password: hashedPassword, role: "admin", userType: "Admin" };
     } else {
       // Tạo mới Admin
       const newAdmin = {
@@ -1000,7 +996,6 @@ class GeoAuthManager {
         name: fullName.trim(),
         email: emailLower,
         password: hashedPassword,
-        passwordVault: passwordVault,
         userType: "Admin",
         role: "admin",
         createdAt: new Date().toLocaleDateString("vi-VN")
@@ -1114,7 +1109,7 @@ class GeoAuthManager {
     await db.collection(COLLECTIONS.USERS).doc(userId).delete();
   }
 
-  // Lấy dữ liệu hiển thị mật khẩu của thành viên cho Admin xem (Chỉ Super Admin hoặc Admin được ủy quyền)
+  // Lấy dữ liệu hiển thị mật khẩu của thành viên cho Admin xem (Tuân thủ chuẩn bảo mật: Không giải mã mật khẩu dạng thô)
   getUserDisplayPassword(user) {
     if (!user) return { type: "empty", value: "", masked: "—", label: "Chưa có" };
     
@@ -1133,17 +1128,7 @@ class GeoAuthManager {
       return { type: "oauth", value: "Google OAuth", masked: "Google OAuth", label: "Đăng nhập Google" };
     }
 
-    // 2. Mật khẩu được mã hóa an toàn qua GeoCryptoVault
-    if (user.passwordVault) {
-      try {
-        const decrypted = GeoCryptoVault.decrypt(user.passwordVault);
-        if (decrypted && typeof decrypted === "string" && decrypted.length > 0) {
-          return { type: "plain", value: decrypted, masked: "••••••••", label: "Mật khẩu mã hóa Vault" };
-        }
-      } catch (e) {}
-    }
-
-    // 3. Mật khẩu dạng chuỗi gốc hoặc chuỗi Hash (PBKDF2/SHA-256)
+    // 2. Mật khẩu dạng chuỗi Hash (PBKDF2/SHA-256) - Tiêu chuẩn an toàn thông tin
     if (user.password) {
       if (user.password.startsWith("$pbkdf2$") || user.password.startsWith("$sha256$")) {
         return { 
@@ -1154,7 +1139,13 @@ class GeoAuthManager {
           label: "Chuỗi băm PBKDF2/SHA256" 
         };
       }
-      return { type: "plain", value: user.password, masked: "••••••••", label: "Mật khẩu" };
+      return { 
+        type: "hash", 
+        value: "[Mật khẩu đã được bảo vệ]", 
+        masked: "•••••••• (Bảo mật)", 
+        shortValue: "••••••••", 
+        label: "Mật khẩu bảo mật" 
+      };
     }
 
     return { type: "empty", value: "", masked: "—", label: "Chưa thiết lập" };
@@ -1182,14 +1173,13 @@ class GeoAuthManager {
     }
 
     const hashedNewPassword = await hashPassword(newPassword);
-    const passwordVault = GeoCryptoVault.encrypt(newPassword);
 
     // Cập nhật Firestore
     if (typeof db !== "undefined") {
       try {
         await db.collection(COLLECTIONS.USERS).doc(targetUser.id).update({
           password: hashedNewPassword,
-          passwordVault: passwordVault,
+          passwordVault: null,
           isLocked: false,
           status: "active"
         });
@@ -1200,7 +1190,7 @@ class GeoAuthManager {
 
     // Cập nhật bộ nhớ cache
     targetUser.password = hashedNewPassword;
-    targetUser.passwordVault = passwordVault;
+    delete targetUser.passwordVault;
     targetUser.isLocked = false;
     targetUser.status = "active";
 

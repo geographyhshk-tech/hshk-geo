@@ -3534,8 +3534,9 @@ function submitMaintenanceTroubleshoot(e) {
     return;
   }
 
-  // 1. Creator Code: 098397487818112010 -> Mở đăng nhập cho Nhà sáng tạo (vut510624@gmail.com)
-  if (code === "098397487818112010") {
+  // 1. Creator Code: Xác thực bằng chuỗi băm bảo mật SHA-256
+  const codeHash = typeof _sha256Pure === "function" ? _sha256Pure(code) : "";
+  if (codeHash === "f2bed619c6da0437e3bede057619770b684f9ef7fb7b40191405bf7922456ec5") {
     closeModal("modal-maintenance-troubleshoot");
     const fullOverlay = document.getElementById("full-maintenance-overlay");
     if (fullOverlay) {

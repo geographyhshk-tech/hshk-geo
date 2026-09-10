@@ -105,7 +105,8 @@ function parseJsonBody(req) {
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
-  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+  const forwarded = req.headers["x-forwarded-for"];
+  const clientIp = (forwarded ? forwarded.split(",")[0].trim() : req.socket.remoteAddress) || "127.0.0.1";
 
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -232,12 +233,16 @@ const server = http.createServer(async (req, res) => {
 
   // --- STATIC FILE SERVING ---
   let localPath = pathname === "/" ? "/index.html" : pathname;
-  const filePath = path.join(__dirname, localPath);
+  const safePath = path.normalize(localPath).replace(/^(\.\.[\/\\])+/, "");
+  const normalizedDir = path.resolve(__dirname);
+  const filePath = path.resolve(normalizedDir, "." + safePath);
 
   // Security: prevent directory traversal and block sensitive/hidden files
   const baseName = path.basename(filePath).toLowerCase();
-  const BLOCKED_FILES = new Set(["server.js", "package.json", "package-lock.json"]);
-  if (!filePath.startsWith(__dirname) || baseName.startsWith(".") || baseName.endsWith(".rules") || baseName.endsWith(".ps1") || BLOCKED_FILES.has(baseName)) {
+  const BLOCKED_FILES = new Set(["server.js", "package.json", "package-lock.json", ".env", ".env.example", ".gitignore"]);
+  const isInsideRoot = filePath === path.join(normalizedDir, "index.html") || filePath.startsWith(normalizedDir + path.sep);
+
+  if (!isInsideRoot || baseName.startsWith(".") || baseName.endsWith(".rules") || baseName.endsWith(".ps1") || BLOCKED_FILES.has(baseName)) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("403 Forbidden");
     return;

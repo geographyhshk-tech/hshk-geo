@@ -1,6 +1,6 @@
 # 🗺️ GEOGRAPHY EDU - TỔNG QUAN CẤU TRÚC DỰ ÁN (PROJECT STRUCTURE)
 
-> **Dự án:** Nền tảng Lưu trữ & Học tập Địa lí Toàn diện 4.0  
+> **Dự án:** Nền tảng Lưu trữ & Học tập Địa lí - High School Help Kit  
 > **Đơn vị phát triển:** High School Help Kit (HSHK) & Group Địa Lí  
 > **Tác giả:** Trần Huy Vũ  
 > **Phiên bản:** 2.0.0

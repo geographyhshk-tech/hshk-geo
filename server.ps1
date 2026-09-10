@@ -18,6 +18,24 @@ $nodeEnv = if ($envMap.ContainsKey("NODE_ENV")) { $envMap["NODE_ENV"] } else { "
 $geminiApiKey = if ($envMap.ContainsKey("GEMINI_API_KEY")) { $envMap["GEMINI_API_KEY"] } else { "" }
 $geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
+# Simple in-memory rate limiter per IP: max 30 requests per minute
+$rateLimitMap = @{}
+function Test-RateLimit($ip) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $windowMs = 60 * 1000
+    $maxReq = 30
+
+    if (-not $rateLimitMap.ContainsKey($ip) -or ($now - $rateLimitMap[$ip].startTime) -gt $windowMs) {
+        $rateLimitMap[$ip] = @{ count = 1; startTime = $now }
+        return $true
+    }
+    if ($rateLimitMap[$ip].count -ge $maxReq) {
+        return $false
+    }
+    $rateLimitMap[$ip].count++
+    return $true
+}
+
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
 $listener.Start()
@@ -28,6 +46,7 @@ while ($listener.IsListening) {
         $context = $listener.GetContext()
         $request = $context.Request
         $response = $context.Response
+        $clientIp = if ($request.Headers["x-forwarded-for"]) { $request.Headers["x-forwarded-for"].Split(",")[0].Trim() } else { $request.RemoteEndPoint.Address.ToString() }
 
         # CORS Headers
         $response.AddHeader("Access-Control-Allow-Origin", "*")
@@ -62,6 +81,16 @@ while ($listener.IsListening) {
 
         # --- API GATEWAY: AI Chat Proxy ---
         if ($localPath -eq "/api/ai/chat" -and $request.HttpMethod -eq "POST") {
+            if (-not (Test-RateLimit $clientIp)) {
+                $errBytes = [System.Text.Encoding]::UTF8.GetBytes('{"error":"Yeu cau qua nhanh. Vui long thu lai sau 1 phut."}')
+                $response.StatusCode = 429
+                $response.ContentType = "application/json; charset=utf-8"
+                $response.ContentLength64 = $errBytes.Length
+                $response.OutputStream.Write($errBytes, 0, $errBytes.Length)
+                $response.OutputStream.Close()
+                continue
+            }
+
             $bodyStream = New-Object System.IO.StreamReader($request.InputStream, $request.ContentEncoding)
             $bodyText = $bodyStream.ReadToEnd()
             $bodyObj = if ($bodyText) { $bodyText | ConvertFrom-Json } else { @{} }
@@ -110,6 +139,16 @@ while ($listener.IsListening) {
 
         # --- API GATEWAY: AI Translate Proxy ---
         if ($localPath -eq "/api/ai/translate" -and $request.HttpMethod -eq "POST") {
+            if (-not (Test-RateLimit $clientIp)) {
+                $errBytes = [System.Text.Encoding]::UTF8.GetBytes('{"error":"Yeu cau qua nhanh. Vui long thu lai sau 1 phut."}')
+                $response.StatusCode = 429
+                $response.ContentType = "application/json; charset=utf-8"
+                $response.ContentLength64 = $errBytes.Length
+                $response.OutputStream.Write($errBytes, 0, $errBytes.Length)
+                $response.OutputStream.Close()
+                continue
+            }
+
             $bodyStream = New-Object System.IO.StreamReader($request.InputStream, $request.ContentEncoding)
             $bodyText = $bodyStream.ReadToEnd()
             $bodyObj = if ($bodyText) { $bodyText | ConvertFrom-Json } else { @{} }
@@ -159,11 +198,33 @@ while ($listener.IsListening) {
             $localPath = "/index.html"
         }
 
-        $filePath = Join-Path $PSScriptRoot $localPath.TrimStart('/')
+        # Security: Prevent Directory Traversal via Canonical Path Check
+        $cleanRelPath = $localPath.TrimStart('/').Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+        $fullPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, $cleanRelPath))
+        $rootCanonical = [System.IO.Path]::GetFullPath($PSScriptRoot)
+
+        # Block any traversal outside project directory
+        if (-not $fullPath.StartsWith($rootCanonical, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $response.StatusCode = 403
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes("403 Forbidden")
+            $response.ContentType = "text/plain; charset=utf-8"
+            $response.ContentLength64 = $bytes.Length
+            $response.OutputStream.Write($bytes, 0, $bytes.Length)
+            $response.OutputStream.Close()
+            continue
+        }
+
+        $filePath = $fullPath
         
         # Security: Block sensitive and hidden files (.env, .rules, .ps1, package.json, server.js, etc.)
         $fileName = (Split-Path $filePath -Leaf).ToLower()
-        if ($fileName.StartsWith(".") -or $fileName.EndsWith(".rules") -or $fileName.EndsWith(".ps1") -or $fileName -eq "package.json" -or $fileName -eq "package-lock.json" -or $fileName -eq "server.js") {
+        $blockedExts = @(".rules", ".ps1", ".env", ".log")
+        $blockedNames = @("package.json", "package-lock.json", "server.js", ".env", ".env.example", ".gitignore")
+        $isBlocked = $fileName.StartsWith(".") -or 
+                     ($blockedExts | Where-Object { $fileName.EndsWith($_) }) -or 
+                     ($blockedNames -contains $fileName)
+
+        if ($isBlocked) {
             $response.StatusCode = 403
             $bytes = [System.Text.Encoding]::UTF8.GetBytes("403 Forbidden")
             $response.ContentType = "text/plain; charset=utf-8"

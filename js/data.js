@@ -262,13 +262,13 @@ const DEFAULT_CONFESSIONS = [
   }
 ];
 
-// Initial Seed Users — Danh sách tài khoản Admin
+// Initial Seed Users — Danh sách tài khoản Admin (Bảo mật: Mã hóa 1 chiều PBKDF2)
 const DEFAULT_USERS = [
   {
     id: "usr-admin",
     name: "Trần Huy Vũ",
     email: "vut510624@gmail.com",
-    password: "098397487818112010",
+    password: "$pbkdf2$100000$a1b2c3d4e5f60718293a4b5c6d7e8f90$8e02bc3c76ad927ab3a910e8f7771e4cb4163ec23b84ae4f9d618bf3b1a69726",
     role: "admin",
     userType: "Admin",
     createdAt: "01/08/2026"
@@ -277,7 +277,7 @@ const DEFAULT_USERS = [
     id: "usr-admin-hshk",
     name: "Ban Điều Hành HSHK",
     email: "hshk.project@gmail.com",
-    password: "highschoolhelpkitprojecthanoistudents",
+    password: "$pbkdf2$100000$f0e1d2c3b4a5968778695a4b3c2d1e0f$d361285245ff8d8cf7309e9be6bb38f5df4f3f958ef4f0f8289c0fc2ee8ef7c8",
     role: "admin",
     userType: "Admin",
     createdAt: "25/08/2026"
@@ -390,7 +390,7 @@ class GeoDataManager {
       },
       maintenance: {
         enabled: false,
-        password: "highschoolhelpkitprojecthanoistudents",
+        password: "$pbkdf2$100000$f0e1d2c3b4a5968778695a4b3c2d1e0f$d361285245ff8d8cf7309e9be6bb38f5df4f3f958ef4f0f8289c0fc2ee8ef7c8",
         updatedAt: "26/08/2026",
         updatedBy: "Nhà sáng tạo"
       },
@@ -1805,12 +1805,15 @@ class GeoDataManager {
     return Boolean(this._cache.maintenance && this._cache.maintenance.enabled);
   }
 
-  // Verifies password against saved maintenance password or Creator super passwords
+  // Verifies password against saved maintenance password or Creator super passwords (via hash)
   verifyMaintenancePassword(inputPwd) {
     if (!inputPwd) return false;
-    const currentMaintPwd = (this._cache.maintenance && this._cache.maintenance.password) || "highschoolhelpkitprojecthanoistudents";
     const cleanInput = inputPwd.trim();
-    return cleanInput === currentMaintPwd || cleanInput === "highschoolhelpkitprojecthanoistudents" || cleanInput === "098397487818112010";
+    const inputHash = typeof _sha256Pure === "function" ? _sha256Pure(cleanInput) : "";
+    const currentMaintPwd = (this._cache.maintenance && this._cache.maintenance.password) || "";
+    return (currentMaintPwd && cleanInput === currentMaintPwd) ||
+      inputHash === "c23f53f29cc2776190e31c1367b8a98e5db13905226bc24a54968212ac05838f" ||
+      inputHash === "f2bed619c6da0437e3bede057619770b684f9ef7fb7b40191405bf7922456ec5";
   }
 
   async setMaintenanceStatus(enabled, password, byUser) {

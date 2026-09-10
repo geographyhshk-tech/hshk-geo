@@ -26,8 +26,8 @@ service cloud.firestore {
     // Kiểm tra tài khoản Super Admin (Chủ sở hữu & Quản trị cấp cao duy nhất)
     function isSuperAdmin() {
       return isAuthenticated() && (
-        getUserEmail() == "vut510624@gmail.com" ||
-        request.auth.token.email == "vut510624@gmail.com"
+        (getUserEmail() == "vut510624@gmail.com" || request.auth.token.email == "vut510624@gmail.com") &&
+        (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider != "password")
       );
     }
 

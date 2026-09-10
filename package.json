@@ -1,7 +1,7 @@
 {
   "name": "geography-edu-hshk",
   "version": "2.0.0",
-  "description": "Nen tang Luu tru & Hoc tap Dia li Toan dien 4.0 - High School Help Kit",
+  "description": "Nen tang Luu tru & Hoc tap Dia li - High School Help Kit",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
